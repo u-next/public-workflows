@@ -1,14 +1,16 @@
-# org-policies/.github/workflows/org-required.yml
-name: Org Required
-
+name: gitleaks
 on:
   pull_request:
     types: [opened, synchronize, reopened]  # runs on all PR updates
-
 jobs:
-  required-check:
+  scan:
+    name: gitleaks
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - name: Minimal org check
-        run: echo "✅ Org-wide check ran successfully!"
+        with:
+          fetch-depth: 0
+      - uses: gitleaks/gitleaks-action@v2
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITLEAKS_LICENSE: ${{ secrets.GITLEAKS_LICENSE }} # Only required for Organizations, not personal accounts.
