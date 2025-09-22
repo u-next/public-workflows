@@ -1,0 +1,21 @@
+name: Test Workflow
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  test-job:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Print Test Message
+        run: |
+          echo "Test workflow is running!"
+          echo "This workflow is used for testing organization requirements"
+          echo "Current time: $(date)"
+          echo "Runner OS: $RUNNER_OS"
+          echo "GitHub Repository: $GITHUB_REPOSITORY"
+          echo "GitHub Actor: $GITHUB_ACTOR"
+          echo "GitHub Event Name: $GITHUB_EVENT_NAME"
