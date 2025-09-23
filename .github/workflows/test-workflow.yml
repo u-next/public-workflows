@@ -14,5 +14,4 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           GITLEAKS_LICENSE: ${{ secrets.GITLEAKS_LICENSE }} # Only required for Organizations, not personal accounts.
-        with:
-          args: ${{ env.GITLEAKS_CONFIG && format('--config={0}', env.GITLEAKS_CONFIG) || '' }}
+          GITLEAKS_CONFIG: ${{ vars.GITLEAKS_CONFIG }}
