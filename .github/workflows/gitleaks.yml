@@ -6,23 +6,24 @@ on:
     types: [opened, synchronize, reopened, ready_for_review, edited]
   merge_group:
   workflow_dispatch:
-  workflow_call:
 jobs:
   scan:
     name: gitleaks
     runs-on: ubuntu-latest
-    # For `edited` events, only base-branch changes need a re-scan; title/body
-    # edits are skipped (a skipped job still satisfies the required check).
-    if: github.event_name != 'pull_request' || github.event.action != 'edited' || github.event.changes.base != null
     continue-on-error: true
     permissions:
       contents: read
       pull-requests: write
     steps:
+      # For `edited` events, only base-branch changes need a re-scan; on
+      # title/body-only edits both steps are skipped and the job still
+      # succeeds, so an already-satisfied required check stays green.
       - uses: actions/checkout@v5
+        if: github.event_name != 'pull_request' || github.event.action != 'edited' || github.event.changes.base
         with:
           fetch-depth: 0
       - uses: gitleaks/gitleaks-action@e0c47f4f8be36e29cdc102c57e68cb5cbf0e8d1e # v3
+        if: github.event_name != 'pull_request' || github.event.action != 'edited' || github.event.changes.base
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           GITLEAKS_LICENSE: ${{ secrets.GITLEAKS_LICENSE }}
