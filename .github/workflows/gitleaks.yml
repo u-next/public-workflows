@@ -1,12 +1,19 @@
 name: gitleaks
 on:
   pull_request:
+    # `edited` re-runs the scan when the PR base branch changes (e.g. after
+    # merging a stacked PR), since GitHub clears the check status on retarget.
+    types: [opened, synchronize, reopened, ready_for_review, edited]
   merge_group:
   workflow_dispatch:
+  workflow_call:
 jobs:
   scan:
     name: gitleaks
     runs-on: ubuntu-latest
+    # For `edited` events, only base-branch changes need a re-scan; title/body
+    # edits are skipped (a skipped job still satisfies the required check).
+    if: github.event_name != 'pull_request' || github.event.action != 'edited' || github.event.changes.base != null
     continue-on-error: true
     permissions:
       contents: read
