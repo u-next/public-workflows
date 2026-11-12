@@ -1,0 +1,21 @@
+name: betterleaks
+on:
+  pull_request:
+  merge_group:
+  workflow_dispatch:
+jobs:
+  scan:
+    name: betterleaks
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      # Full path (not ./) so it resolves to this repo when run as an org ruleset workflow.
+      - uses: u-next/public-workflows/.github/actions/betterleaks@ee2e65847663fa8f64d256f00385a749918bf276
+        with:
+          config: ${{ vars.GITLEAKS_CONFIG }}
