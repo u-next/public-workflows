@@ -1,0 +1,179 @@
+name: betterleaks
+description: >-
+  Scan git history for leaked secrets with Betterleaks (https://github.com/betterleaks/betterleaks).
+  The binary is downloaded from GitHub Releases with retries, verified against a pinned
+  SHA-256 checksum, and cached. Scans only the PR / merge-group commit range when available.
+
+inputs:
+  version:
+    description: >-
+      Betterleaks version (without "v"). When changing this, also update the checksum
+      table in the "Resolve release asset" step, or pass `sha256`.
+    default: "1.10.0"
+  sha256:
+    description: SHA-256 of the release tarball for this runner. Overrides the built-in table.
+    default: ""
+  config:
+    description: >-
+      Path to a config file (gitleaks-compatible TOML). Empty uses the built-in rules
+      (or the repo's .betterleaks.toml / .gitleaks.toml when auto-load-config is true).
+    default: ""
+  auto-load-config:
+    description: >-
+      Load .betterleaks.toml / .gitleaks.toml from the repository root, matching gitleaks'
+      behaviour. Only enable for repositories you trust.
+    default: "true"
+  log-opts:
+    description: Extra `git log` options. Overrides the range detected from the event.
+    default: ""
+  path:
+    description: Path to the checked-out repository.
+    default: "."
+
+outputs:
+  exit-code:
+    description: Betterleaks exit code (0 = no leaks, 1 = leaks found, other = error).
+    value: ${{ steps.scan.outputs.exit-code }}
+  report:
+    description: Path to the JSON report.
+    value: ${{ steps.scan.outputs.report }}
+
+runs:
+  using: composite
+  steps:
+    - name: Resolve release asset
+      id: asset
+      shell: bash
+      env:
+        VERSION: ${{ inputs.version }}
+        SHA256: ${{ inputs.sha256 }}
+        RUNNER_OS_: ${{ runner.os }}
+        RUNNER_ARCH_: ${{ runner.arch }}
+      run: |
+        set -euo pipefail
+        case "${RUNNER_OS_}" in
+          Linux) os=linux ;;
+          macOS) os=darwin ;;
+          *) echo "::error::Unsupported runner OS: ${RUNNER_OS_}"; exit 1 ;;
+        esac
+        case "${RUNNER_ARCH_}" in
+          X64) arch=x64 ;;
+          ARM64) arch=arm64 ;;
+          *) echo "::error::Unsupported runner arch: ${RUNNER_ARCH_}"; exit 1 ;;
+        esac
+        name="betterleaks_${VERSION}_${os}_${arch}.tar.gz"
+
+        if [ -z "${SHA256}" ]; then
+          # From https://github.com/betterleaks/betterleaks/releases/download/v<version>/checksums.txt
+          case "${name}" in
+            betterleaks_1.10.0_linux_x64.tar.gz)   SHA256=9d9ad503cd5d80d18a939352266c3fcca52f10da9b83cd5cfe646989b13940fe ;;
+            betterleaks_1.10.0_linux_arm64.tar.gz) SHA256=3d7585cbe4f947aef6e31662f65beb5b43b104381a691b6b81b157ebfbb0c02d ;;
+            betterleaks_1.10.0_darwin_x64.tar.gz)  SHA256=71b3f30602856e622008c248b1b47b2ba15b227f4a033e8bfdfa05a21ec7d531 ;;
+            betterleaks_1.10.0_darwin_arm64.tar.gz) SHA256=91eaea97709d3308c7712574a56260539c65fbd0672711537aa68d566ea630b3 ;;
+            *) echo "::error::No pinned checksum for ${name}. Pass the 'sha256' input."; exit 1 ;;
+          esac
+        fi
+
+        {
+          echo "name=${name}"
+          echo "sha256=${SHA256}"
+          echo "url=https://github.com/betterleaks/betterleaks/releases/download/v${VERSION}/${name}"
+          echo "dir=${RUNNER_TOOL_CACHE}/betterleaks/${VERSION}/${os}-${arch}"
+        } >> "$GITHUB_OUTPUT"
+
+    - name: Restore cache
+      id: cache
+      uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+      with:
+        path: ${{ steps.asset.outputs.dir }}
+        key: betterleaks-${{ steps.asset.outputs.name }}-${{ steps.asset.outputs.sha256 }}
+
+    - name: Install betterleaks
+      shell: bash
+      env:
+        NAME: ${{ steps.asset.outputs.name }}
+        URL: ${{ steps.asset.outputs.url }}
+        SHA256: ${{ steps.asset.outputs.sha256 }}
+        DIR: ${{ steps.asset.outputs.dir }}
+        CACHE_HIT: ${{ steps.cache.outputs.cache-hit }}
+      run: |
+        set -euo pipefail
+        if [ "${CACHE_HIT}" != "true" ] || [ ! -x "${DIR}/betterleaks" ]; then
+          tmp="$(mktemp -d)"
+          curl -fsSL --retry 5 --retry-all-errors --retry-delay 10 --connect-timeout 20 \
+            -o "${tmp}/${NAME}" "${URL}"
+          echo "${SHA256}  ${tmp}/${NAME}" | sha256sum -c -
+          mkdir -p "${DIR}"
+          tar -xzf "${tmp}/${NAME}" -C "${DIR}" betterleaks
+          rm -rf "${tmp}"
+        fi
+        echo "${DIR}" >> "$GITHUB_PATH"
+        "${DIR}/betterleaks" version
+
+    - name: Scan
+      id: scan
+      shell: bash
+      working-directory: ${{ inputs.path }}
+      env:
+        EVENT_NAME: ${{ github.event_name }}
+        PR_BASE: ${{ github.event.pull_request.base.sha }}
+        PR_HEAD: ${{ github.event.pull_request.head.sha }}
+        MG_BASE: ${{ github.event.merge_group.base_sha }}
+        MG_HEAD: ${{ github.event.merge_group.head_sha }}
+        LOG_OPTS: ${{ inputs.log-opts }}
+        AUTO_LOAD: ${{ inputs.auto-load-config }}
+        BETTERLEAKS_CONFIG: ${{ inputs.config }}
+        # Make sure an inherited GITLEAKS_CONFIG doesn't silently override `config`.
+        GITLEAKS_CONFIG: ${{ inputs.config }}
+        BLOB_BASE: ${{ github.server_url }}/${{ github.repository }}/blob
+      run: |
+        set -uo pipefail
+        report="${RUNNER_TEMP}/betterleaks-report.json"
+        echo "report=${report}" >> "$GITHUB_OUTPUT"
+
+        if [ -z "${LOG_OPTS}" ]; then
+          case "${EVENT_NAME}" in
+            pull_request|pull_request_target) [ -n "${PR_BASE}" ] && LOG_OPTS="--no-merges ${PR_BASE}..${PR_HEAD}" ;;
+            merge_group) [ -n "${MG_BASE}" ] && LOG_OPTS="--no-merges ${MG_BASE}..${MG_HEAD}" ;;
+          esac
+        fi
+
+        args=(git . --no-banner --no-color --redact --platform github
+              --report-format json --report-path "${report}")
+        [ -n "${LOG_OPTS}" ] && args+=(--log-opts "${LOG_OPTS}")
+        [ "${AUTO_LOAD}" = "true" ] && args+=(--unsafe-auto-load-config)
+
+        echo "Range: ${LOG_OPTS:-full history}"
+        betterleaks "${args[@]}"
+        code=$?
+        echo "exit-code=${code}" >> "$GITHUB_OUTPUT"
+
+        {
+          echo "## 🔐 Betterleaks"
+          echo
+          echo "Range: \`${LOG_OPTS:-full history}\`"
+          echo
+        } >> "$GITHUB_STEP_SUMMARY"
+
+        if [ "${code}" -eq 0 ]; then
+          echo "✅ No leaks found." >> "$GITHUB_STEP_SUMMARY"
+          exit 0
+        fi
+
+        if [ "${code}" -eq 1 ] && [ -s "${report}" ]; then
+          count="$(jq 'length' "${report}")"
+          {
+            echo "🛑 **${count} leak(s) found.** Secrets are redacted. Rotate any real credential, then remove it from history or add the fingerprint to \`.gitleaksignore\` if it is a false positive."
+            echo
+            echo "| Rule | Location | Commit | Fingerprint |"
+            echo "| --- | --- | --- | --- |"
+            jq -r --arg base "${BLOB_BASE}" '.[] |
+              "| \(.RuleID) | [\(.File):\(.StartLine)](\($base)/\(.Commit)/\(.File)#L\(.StartLine)) | `\(.Commit[0:7])` | `\(.Fingerprint)` |"' "${report}"
+          } >> "$GITHUB_STEP_SUMMARY"
+          # Inline annotations on the PR diff.
+          jq -r '.[] |
+            "::error file=\(.File),line=\(.StartLine),endLine=\(.EndLine),title=betterleaks: \(.RuleID)::\(.Description) (commit \(.Commit[0:7]), fingerprint \(.Fingerprint))"' "${report}"
+        else
+          echo "⚠️ Betterleaks exited with code ${code}. See the job log." >> "$GITHUB_STEP_SUMMARY"
+        fi
+        exit "${code}"
