@@ -144,8 +144,11 @@ runs:
         [ "${AUTO_LOAD}" = "true" ] && args+=(--unsafe-auto-load-config)
 
         echo "Range: ${LOG_OPTS:-full history}"
-        betterleaks "${args[@]}"
-        code=$?
+        # `shell: bash` runs with -e, which `set -uo pipefail` does not turn
+        # off; without `|| code=$?` a finding (exit 1) aborts the step before
+        # the summary and annotations below are written.
+        code=0
+        betterleaks "${args[@]}" || code=$?
         echo "exit-code=${code}" >> "$GITHUB_OUTPUT"
 
         {
