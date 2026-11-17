@@ -14,7 +14,8 @@ jobs:
         with:
           fetch-depth: 0
           persist-credentials: false
-      # Full path (not ./) so it resolves to this repo when run as an org ruleset workflow.
-      - uses: u-next/public-workflows/.github/actions/betterleaks@v1
+      # $/ (not ./, which is the scanned repo's workspace) runs the action from this repo
+      # at the workflow's own commit, so it needs no tag or actions.lock entry.
+      - uses: $/.github/actions/betterleaks
         with:
           config: ${{ vars.GITLEAKS_CONFIG }}
