@@ -14,8 +14,8 @@ jobs:
         with:
           fetch-depth: 0
           persist-credentials: false
-      # $/ (not ./) runs the action from this repo at the workflow's own commit, also when
-      # injected by an org ruleset, so it needs no tag or actions.lock entry.
+      # $/ (not ./, which is the scanned repo's workspace) runs the action from this repo
+      # at the workflow's own commit, so it needs no tag or actions.lock entry.
       - uses: $/.github/actions/betterleaks
         with:
           config: ${{ vars.GITLEAKS_CONFIG }}
